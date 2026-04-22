@@ -311,20 +311,28 @@ export default function Dashboard() {
                   return (
                     <div key={`${index}-${day.label}`} className="flex flex-1 flex-col items-center gap-2">
                       <div className="flex h-40 w-full items-end gap-1 rounded-2xl bg-slate-50 p-2">
-                        <div
-                          className="w-1/2 rounded-full bg-emerald-500"
-                          style={{
-                            height: `${Math.max((day.in / maxTotal) * 100, 10)}%`,
-                          }}
-                          title={`IN ${day.in}`}
-                        />
-                        <div
-                          className="w-1/2 rounded-full bg-sky-500"
-                          style={{
-                            height: `${Math.max((day.out / maxTotal) * 100, 10)}%`,
-                          }}
-                          title={`OUT ${day.out}`}
-                        />
+                        <div className="group relative flex h-full w-1/2 items-end justify-center">
+                          <div
+                            className="w-full rounded-full bg-emerald-500 transition-transform duration-200 group-hover:scale-[1.03]"
+                            style={{
+                              height: `${Math.max((day.in / maxTotal) * 100, 10)}%`,
+                            }}
+                          />
+                          <div className="pointer-events-none absolute -top-11 left-1/2 z-10 hidden -translate-x-1/2 rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                            IN: {day.in}
+                          </div>
+                        </div>
+                        <div className="group relative flex h-full w-1/2 items-end justify-center">
+                          <div
+                            className="w-full rounded-full bg-sky-500 transition-transform duration-200 group-hover:scale-[1.03]"
+                            style={{
+                              height: `${Math.max((day.out / maxTotal) * 100, 10)}%`,
+                            }}
+                          />
+                          <div className="pointer-events-none absolute -top-11 left-1/2 z-10 hidden -translate-x-1/2 rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                            OUT: {day.out}
+                          </div>
+                        </div>
                       </div>
                       <span className="text-xs font-medium text-slate-500">{day.label}</span>
                     </div>

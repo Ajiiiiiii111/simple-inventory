@@ -160,16 +160,24 @@ function ChartPageContent() {
             {stockMovements.map((day) => (
               <div key={`${day.label}-${day.in}-${day.out}`} className="flex flex-col items-center gap-3">
                 <div className="flex h-72 w-full items-end gap-2 rounded-3xl bg-slate-50 p-3">
-                  <div
-                    className="w-1/2 rounded-full bg-emerald-500"
-                    style={{ height: `${Math.max((day.in / maxTotal) * 100, 10)}%` }}
-                    title={`IN ${day.in}`}
-                  />
-                  <div
-                    className="w-1/2 rounded-full bg-sky-500"
-                    style={{ height: `${Math.max((day.out / maxTotal) * 100, 10)}%` }}
-                    title={`OUT ${day.out}`}
-                  />
+                  <div className="group relative flex h-full w-1/2 items-end justify-center">
+                    <div
+                      className="w-full rounded-full bg-emerald-500 transition-transform duration-200 group-hover:scale-[1.03]"
+                      style={{ height: `${Math.max((day.in / maxTotal) * 100, 10)}%` }}
+                    />
+                    <div className="pointer-events-none absolute -top-12 left-1/2 z-10 hidden -translate-x-1/2 rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                      IN: {day.in}
+                    </div>
+                  </div>
+                  <div className="group relative flex h-full w-1/2 items-end justify-center">
+                    <div
+                      className="w-full rounded-full bg-sky-500 transition-transform duration-200 group-hover:scale-[1.03]"
+                      style={{ height: `${Math.max((day.out / maxTotal) * 100, 10)}%` }}
+                    />
+                    <div className="pointer-events-none absolute -top-12 left-1/2 z-10 hidden -translate-x-1/2 rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                      OUT: {day.out}
+                    </div>
+                  </div>
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-semibold text-slate-900">{day.label}</p>
