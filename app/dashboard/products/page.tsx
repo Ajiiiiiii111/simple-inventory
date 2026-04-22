@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { inventoryMetrics, productStatuses, type ProductRow } from "@/lib/inventory";
+import type { ProductRow } from "@/lib/inventory";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type ProductFormState = {
   name: string;
@@ -11,91 +11,127 @@ type ProductFormState = {
 };
 
 type StockAdjustmentState = {
-  name: string;
+  productId: string;
   quantity: string;
   type: "IN" | "OUT";
 };
 
-const storageKey = "simple-inventory-products";
+type ProductRecord = ProductRow & {
+  id: string;
+};
+
+type PendingAction =
+  | { type: "save-product" }
+  | { type: "apply-stock-movement" }
+  | { type: "edit-product"; product: ProductRecord }
+  | { type: "delete-product"; product: ProductRecord };
+
+function getModeFromUrl(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return new URLSearchParams(window.location.search).get("mode");
+}
 
 export default function ProductsPage() {
-  const searchParams = useSearchParams();
-  const mode = searchParams.get("mode");
-  const [products, setProducts] = useState<ProductRow[]>(productStatuses);
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const hasSupabaseConfig = Boolean(supabase);
+  const mode = useMemo(() => getModeFromUrl(), []);
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [form, setForm] = useState<ProductFormState>({ name: "", quantity: "" });
-  const [editingProduct, setEditingProduct] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [stockAdjustment, setStockAdjustment] = useState<StockAdjustmentState>({
-    name: "",
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [message, setMessage] = useState(
+    hasSupabaseConfig
+      ? mode === "add"
+        ? "Ready to add a new product."
+        : ""
+      : "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local, then restart the dev server.",
+  );
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const accessTokenRef = useRef<string | null>(null);
+  const [stockAdjustment, setStockAdjustment] = useState<StockAdjustmentState>(() => ({
+    productId: "",
     quantity: "1",
-    type: "IN",
-  });
+    type: mode === "out" ? "OUT" : "IN",
+  }));
+
+  async function fetchProducts(token: string | null) {
+    try {
+      if (!token) {
+        setProducts([]);
+        setMessage("Sign in to view and manage your products.");
+        return;
+      }
+
+      const response = await fetch("/api/products", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const body = (await response.json()) as { error?: string; products?: ProductRecord[] };
+
+      if (!response.ok) {
+        setMessage(body.error ?? "Unable to load products.");
+        return;
+      }
+
+      setProducts(Array.isArray(body.products) ? body.products : []);
+    } catch {
+      setMessage("Unable to load products.");
+    }
+  }
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(storageKey);
+    const client = supabase;
 
-    if (!saved) {
+    if (!client) {
       return;
     }
 
-    try {
-      const parsed = JSON.parse(saved) as ProductRow[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setProducts(parsed);
+    const supabaseClient = client;
+
+    let isMounted = true;
+
+    async function loadSession() {
+      const { data } = await supabaseClient.auth.getSession();
+
+      if (!isMounted) {
+        return;
       }
-    } catch {
-      window.localStorage.removeItem(storageKey);
-    }
-  }, []);
 
-  useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(products));
-  }, [products]);
-
-  useEffect(() => {
-    if (mode === "add") {
-      setEditingProduct(null);
-      setForm({ name: "", quantity: "" });
-      setMessage("Ready to add a new product.");
+      const token = data.session?.access_token ?? null;
+      accessTokenRef.current = token;
+      await fetchProducts(token);
     }
 
-    if (mode === "in" || mode === "out") {
-      setStockAdjustment((current) => ({ ...current, type: mode === "in" ? "IN" : "OUT" }));
-    }
-  }, [mode]);
+    void loadSession();
 
-  const selectedProduct = useMemo(
-    () => products.find((product) => product.name === editingProduct) ?? null,
-    [editingProduct, products],
-  );
+    const { data } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) {
+        return;
+      }
 
-  useEffect(() => {
-    if (selectedProduct) {
-      setForm({
-        name: selectedProduct.name,
-        quantity: String(selectedProduct.quantity),
-      });
-    }
-  }, [selectedProduct]);
+      const token = session?.access_token ?? null;
+      accessTokenRef.current = token;
+      void fetchProducts(token);
+    });
 
-  function deriveStatus(quantity: number): ProductRow["status"] {
-    if (quantity === 0) {
-      return "Critical";
-    }
-
-    if (quantity < 10) {
-      return "Low";
-    }
-
-    return "Good";
-  }
+    return () => {
+      isMounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   function resetForm() {
     setForm({ name: "", quantity: "" });
-    setEditingProduct(null);
+    setEditingProductId(null);
   }
 
-  function handleSaveProduct() {
+  async function saveProduct() {
     const trimmedName = form.name.trim();
     const quantity = Number(form.quantity);
 
@@ -106,7 +142,7 @@ export default function ProductsPage() {
 
     const duplicateName = products.some(
       (product) =>
-        product.name.toLowerCase() === trimmedName.toLowerCase() && product.name !== editingProduct,
+        product.name.toLowerCase() === trimmedName.toLowerCase() && product.id !== editingProductId,
     );
 
     if (duplicateName) {
@@ -114,77 +150,201 @@ export default function ProductsPage() {
       return;
     }
 
-    const nextProduct: ProductRow = {
-      name: trimmedName,
-      quantity,
-      status: deriveStatus(quantity),
-    };
+    const isEditing = Boolean(editingProductId);
 
-    setProducts((current) => {
-      const existingIndex = current.findIndex((product) => product.name === editingProduct);
+    try {
+      setIsSubmitting(true);
+      const response = await fetch(isEditing ? `/api/products/${editingProductId}` : "/api/products", {
+        method: isEditing ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessTokenRef.current ? { Authorization: `Bearer ${accessTokenRef.current}` } : {}),
+        },
+        body: JSON.stringify({ name: trimmedName, quantity }),
+      });
+      const body = (await response.json()) as { error?: string };
 
-      if (existingIndex >= 0) {
-        const next = [...current];
-        next[existingIndex] = nextProduct;
-        return next;
+      if (!response.ok) {
+        setMessage(body.error ?? "Unable to save product.");
+        return;
       }
 
-      return [nextProduct, ...current];
-    });
-
-    setMessage(editingProduct ? "Product updated." : "Product added.");
-    resetForm();
+      await fetchProducts(accessTokenRef.current);
+      setMessage(isEditing ? "Product updated." : "Product added.");
+      resetForm();
+    } catch {
+      setMessage("Unable to save product.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function handleEditProduct(product: ProductRow) {
-    setEditingProduct(product.name);
+  function editProduct(product: ProductRecord) {
+    setEditingProductId(product.id);
     setForm({ name: product.name, quantity: String(product.quantity) });
     setMessage(`Editing ${product.name}.`);
   }
 
-  function handleDeleteProduct(name: string) {
-    setProducts((current) => current.filter((product) => product.name !== name));
+  async function deleteProduct(product: ProductRecord) {
+    try {
+      setIsSubmitting(true);
+      const response = await fetch(`/api/products/${product.id}`, {
+        method: "DELETE",
+        headers: accessTokenRef.current
+          ? {
+              Authorization: `Bearer ${accessTokenRef.current}`,
+            }
+          : undefined,
+      });
+      const body = (await response.json()) as { error?: string };
 
-    if (editingProduct === name) {
-      resetForm();
+      if (!response.ok) {
+        setMessage(body.error ?? "Unable to delete product.");
+        return;
+      }
+
+      await fetchProducts(accessTokenRef.current);
+
+      if (editingProductId === product.id) {
+        resetForm();
+      }
+
+      if (stockAdjustment.productId === product.id) {
+        setStockAdjustment((current) => ({ ...current, productId: "" }));
+      }
+
+      setMessage("Product deleted.");
+    } catch {
+      setMessage("Unable to delete product.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setMessage("Product deleted.");
   }
 
-  function handleStockAdjustment() {
+  async function applyStockAdjustment() {
     const quantity = Number(stockAdjustment.quantity);
-    const targetName = stockAdjustment.name.trim();
+    const productId = stockAdjustment.productId.trim();
 
-    if (!targetName || Number.isNaN(quantity) || quantity <= 0) {
+    if (!productId || Number.isNaN(quantity) || quantity <= 0) {
       setMessage("Select a product and enter a quantity greater than zero.");
       return;
     }
 
-    let matched = false;
+    try {
+      setIsSubmitting(true);
+      const response = await fetch("/api/stock-movement", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessTokenRef.current ? { Authorization: `Bearer ${accessTokenRef.current}` } : {}),
+        },
+        body: JSON.stringify({
+          productId,
+          quantity,
+          type: stockAdjustment.type,
+        }),
+      });
+      const body = (await response.json()) as { error?: string };
 
-    setProducts((current) =>
-      current.map((product) => {
-        if (product.name !== targetName) {
-          return product;
-        }
+      if (!response.ok) {
+        setMessage(body.error ?? "Unable to apply stock movement.");
+        return;
+      }
 
-        matched = true;
-        const delta = stockAdjustment.type === "IN" ? quantity : -quantity;
-        const nextQuantity = Math.max(0, product.quantity + delta);
+      await fetchProducts(accessTokenRef.current);
+      setMessage(`Stock ${stockAdjustment.type.toLowerCase()} recorded.`);
+      setStockAdjustment((current) => ({ ...current, quantity: "1" }));
+    } catch {
+      setMessage("Unable to apply stock movement.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
-        return {
-          ...product,
-          quantity: nextQuantity,
-          status: deriveStatus(nextQuantity),
-        };
-      }),
+  function requestSaveProduct() {
+    const trimmedName = form.name.trim();
+    const quantity = Number(form.quantity);
+
+    if (!trimmedName || Number.isNaN(quantity) || quantity < 0) {
+      setMessage("Enter a valid product name and quantity.");
+      return;
+    }
+
+    const duplicateName = products.some(
+      (product) =>
+        product.name.toLowerCase() === trimmedName.toLowerCase() && product.id !== editingProductId,
     );
 
-    setMessage(matched ? `Stock ${stockAdjustment.type.toLowerCase()} recorded.` : "Product not found.");
+    if (duplicateName) {
+      setMessage("A product with that name already exists.");
+      return;
+    }
+
+    setPendingAction({ type: "save-product" });
+  }
+
+  function requestApplyStockAdjustment() {
+    const quantity = Number(stockAdjustment.quantity);
+    const productId = stockAdjustment.productId.trim();
+    const selectedProduct = products.find((product) => product.id === productId);
+
+    if (!productId || Number.isNaN(quantity) || quantity <= 0) {
+      setMessage("Select a product and enter a quantity greater than zero.");
+      return;
+    }
+
+    if (stockAdjustment.type === "OUT" && selectedProduct && quantity > selectedProduct.quantity) {
+      setMessage(
+        `Cannot move out ${quantity}. Only ${selectedProduct.quantity} unit(s) available for ${selectedProduct.name}.`,
+      );
+      return;
+    }
+
+    setPendingAction({ type: "apply-stock-movement" });
+  }
+
+  function requestEditProduct(product: ProductRecord) {
+    setPendingAction({ type: "edit-product", product });
+  }
+
+  function requestDeleteProduct(product: ProductRecord) {
+    setPendingAction({ type: "delete-product", product });
+  }
+
+  async function handleConfirmAction() {
+    if (!pendingAction) {
+      return;
+    }
+
+    if (pendingAction.type === "save-product") {
+      await saveProduct();
+    }
+
+    if (pendingAction.type === "apply-stock-movement") {
+      await applyStockAdjustment();
+    }
+
+    if (pendingAction.type === "edit-product") {
+      editProduct(pendingAction.product);
+    }
+
+    if (pendingAction.type === "delete-product") {
+      await deleteProduct(pendingAction.product);
+    }
+
+    setPendingAction(null);
   }
 
   const alertCount = products.filter((product) => product.status !== "Good").length;
+  const filteredProducts = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    if (!query) {
+      return products;
+    }
+
+    return products.filter((product) => product.name.toLowerCase().includes(query));
+  }, [products, searchQuery]);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#eef2ff_45%,_#e2e8f0_100%)] px-6 py-10 text-slate-900 sm:px-8 lg:px-12">
@@ -207,59 +367,15 @@ export default function ProductsPage() {
           </div>
         ) : null}
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {inventoryMetrics.map((metric) => (
-            <article
-              key={metric.label}
-              className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur"
-            >
-              <div className={`h-1.5 w-16 rounded-full bg-gradient-to-r ${metric.accent}`} />
-              <p className="mt-6 text-sm font-medium text-slate-500">{metric.label}</p>
-              <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">
-                {metric.value}
-              </h2>
-              <p className="mt-4 text-sm leading-6 text-slate-600">{metric.detail}</p>
-            </article>
-          ))}
-        </section>
+        {!hasSupabaseConfig ? (
+          <article className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm leading-6 text-amber-900">
+            Supabase is not configured yet. Add your project URL and anon key to .env.local, then
+            restart the dev server.
+          </article>
+        ) : null}
 
         <section className="grid gap-6 xl:grid-cols-5">
           <article className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur xl:col-span-2">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
-              Quick Actions
-            </p>
-            <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
-              Manage products
-            </h2>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingProduct(null);
-                  setForm({ name: "", quantity: "" });
-                  setMessage("Ready to add a new product.");
-                }}
-                className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
-              >
-                Add Product
-              </button>
-              <button
-                type="button"
-                onClick={() => setStockAdjustment((current) => ({ ...current, type: "IN" }))}
-                className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white"
-              >
-                Stock In
-              </button>
-              <button
-                type="button"
-                onClick={() => setStockAdjustment((current) => ({ ...current, type: "OUT" }))}
-                className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white"
-              >
-                Stock Out
-              </button>
-            </div>
-
             <div className="mt-6 space-y-4 rounded-3xl bg-slate-50 p-4">
               <div>
                 <label className="text-sm font-medium text-slate-700">Product Name</label>
@@ -288,10 +404,11 @@ export default function ProductsPage() {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={handleSaveProduct}
+                  onClick={requestSaveProduct}
+                  disabled={!hasSupabaseConfig}
                   className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
                 >
-                  {editingProduct ? "Update Product" : "Save Product"}
+                  {editingProductId ? "Update Product" : "Save Product"}
                 </button>
                 <button
                   type="button"
@@ -307,15 +424,15 @@ export default function ProductsPage() {
               <div>
                 <label className="text-sm font-medium text-slate-700">Stock Movement</label>
                 <select
-                  value={stockAdjustment.name}
+                  value={stockAdjustment.productId}
                   onChange={(event) =>
-                    setStockAdjustment((current) => ({ ...current, name: event.target.value }))
+                    setStockAdjustment((current) => ({ ...current, productId: event.target.value }))
                   }
                   className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
                 >
                   <option value="">Select product</option>
                   {products.map((product) => (
-                    <option key={product.name} value={product.name}>
+                    <option key={product.id} value={product.id}>
                       {product.name}
                     </option>
                   ))}
@@ -356,7 +473,8 @@ export default function ProductsPage() {
               </div>
               <button
                 type="button"
-                onClick={handleStockAdjustment}
+                onClick={requestApplyStockAdjustment}
+                disabled={!hasSupabaseConfig}
                 className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white"
               >
                 Apply Stock Movement
@@ -374,6 +492,19 @@ export default function ProductsPage() {
                   </p>
                 </div>
                 <span className="text-sm font-medium text-slate-500">{alertCount} alerts active</span>
+              </div>
+              <div className="mt-4">
+                <label htmlFor="product-search" className="text-sm font-medium text-slate-700">
+                  Search product
+                </label>
+                <input
+                  id="product-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search by product name"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
+                />
               </div>
             </div>
 
@@ -396,7 +527,7 @@ export default function ProductsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {products.map((product) => (
+                  {filteredProducts.map((product) => (
                     <tr key={product.name} className="hover:bg-slate-50/80">
                       <td className="px-6 py-4 text-sm font-medium text-slate-900 sm:px-7">
                         {product.name}
@@ -426,14 +557,14 @@ export default function ProductsPage() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => handleEditProduct(product)}
+                            onClick={() => requestEditProduct(product)}
                             className="rounded-full border border-slate-200 px-3 py-1.5 font-medium text-slate-700"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDeleteProduct(product.name)}
+                            onClick={() => requestDeleteProduct(product)}
                             className="rounded-full border border-rose-200 px-3 py-1.5 font-medium text-rose-700"
                           >
                             Delete
@@ -442,12 +573,58 @@ export default function ProductsPage() {
                       </td>
                     </tr>
                   ))}
+                  {filteredProducts.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-6 py-8 text-center text-sm text-slate-500 sm:px-7"
+                      >
+                        {searchQuery.trim()
+                          ? "No products match your search."
+                          : "No products found for this account yet. Add your first product."}
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
           </article>
         </section>
       </div>
+
+      {pendingAction ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4">
+          <div className="w-full max-w-md rounded-3xl border border-white/70 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.28)]">
+            <h3 className="text-lg font-semibold text-slate-950">Confirm action</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {pendingAction.type === "save-product"
+                ? `Are you sure you want to ${editingProductId ? "update" : "save"} this product?`
+                : pendingAction.type === "apply-stock-movement"
+                  ? `Apply ${stockAdjustment.type} movement for ${stockAdjustment.quantity} unit(s)?`
+                  : pendingAction.type === "edit-product"
+                    ? `Load ${pendingAction.product.name} into the form for editing?`
+                    : `Delete ${pendingAction.product.name}? This cannot be undone.`}
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingAction(null)}
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAction}
+                disabled={isSubmitting}
+                className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+              >
+                {isSubmitting ? "Processing..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -34,3 +34,28 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Supabase Backend Setup
+
+1. Create a Supabase project and copy your project URL, anon key, and service role key.
+2. Copy `.env.example` to `.env.local` and set real values.
+3. Enable email confirmations in Supabase Auth so new registrations must verify their email.
+4. Open Supabase SQL Editor and run `supabase/schema.sql`.
+5. Start the app with `npm run dev`.
+
+### Environment Variables
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+### API Routes Added
+
+- `GET /api/products` list all products
+- `POST /api/products` create a product
+- `PATCH /api/products/:id` update a product
+- `DELETE /api/products/:id` delete a product
+- `POST /api/stock-movement` apply IN/OUT stock movement and log transaction
+
+The home page now serves login and register forms instead of the old dashboard links.
+Products and stock movements are scoped to the signed-in Supabase user, so each account only sees its own records.

@@ -1,6 +1,78 @@
-import { predictions } from "@/lib/inventory";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import type { PredictionRow } from "@/lib/inventory";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function PredictionsPage() {
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [predictions, setPredictions] = useState<PredictionRow[]>([]);
+  const [message, setMessage] = useState(
+    supabase
+      ? ""
+      : "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local, then restart the dev server.",
+  );
+
+  useEffect(() => {
+    const client = supabase;
+
+    if (!client) {
+      return;
+    }
+
+    const supabaseClient = client;
+
+    let isMounted = true;
+
+    async function fetchPredictions(token: string | null) {
+      if (!token) {
+        if (isMounted) {
+          setPredictions([]);
+          setMessage("Sign in to view your predictions.");
+        }
+        return;
+      }
+
+      const response = await fetch("/api/dashboard/predictions", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const body = (await response.json()) as { error?: string; predictions?: PredictionRow[] };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (!response.ok) {
+        setPredictions([]);
+        setMessage(body.error ?? "Unable to load predictions.");
+        return;
+      }
+
+      setPredictions(Array.isArray(body.predictions) ? body.predictions : []);
+      setMessage("");
+    }
+
+    async function loadSession() {
+      const { data } = await supabaseClient.auth.getSession();
+      await fetchPredictions(data.session?.access_token ?? null);
+    }
+
+    void loadSession();
+
+    const { data } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      void fetchPredictions(session?.access_token ?? null);
+    });
+
+    return () => {
+      isMounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#eef2ff_45%,_#e2e8f0_100%)] px-6 py-10 text-slate-900 sm:px-8 lg:px-12">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
@@ -15,6 +87,12 @@ export default function PredictionsPage() {
             This section highlights products that may need replenishment before stock hits zero.
           </p>
         </header>
+
+        {message ? (
+          <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-700 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+            {message}
+          </div>
+        ) : null}
 
         <section className="grid gap-5 lg:grid-cols-2">
           {predictions.map((item) => (
@@ -47,6 +125,11 @@ export default function PredictionsPage() {
               <p className="mt-4 text-sm leading-6 text-slate-600">{item.recommendation}</p>
             </article>
           ))}
+          {predictions.length === 0 ? (
+            <article className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur lg:col-span-2">
+              <p className="text-sm text-slate-600">No prediction data yet. Add products and stock movement first.</p>
+            </article>
+          ) : null}
         </section>
       </div>
     </main>
