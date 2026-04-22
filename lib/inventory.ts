@@ -9,6 +9,7 @@ export type ProductRow = {
 };
 
 export type TransactionRow = {
+  id: string;
   name: string;
   type: TransactionType;
   quantity: number;
@@ -66,11 +67,11 @@ export const productStatuses: ProductRow[] = [
 ];
 
 export const recentTransactions: TransactionRow[] = [
-  { name: "Wireless Mouse", type: "IN", quantity: 25, date: "2026-04-20" },
-  { name: "USB-C Cable", type: "OUT", quantity: 4, date: "2026-04-20" },
-  { name: "Laptop Stand", type: "OUT", quantity: 2, date: "2026-04-19" },
-  { name: "Desk Lamp", type: "IN", quantity: 12, date: "2026-04-18" },
-  { name: "Keyboard", type: "OUT", quantity: 1, date: "2026-04-18" },
+  { id: "tx-1", name: "Wireless Mouse", type: "IN", quantity: 25, date: "2026-04-20" },
+  { id: "tx-2", name: "USB-C Cable", type: "OUT", quantity: 4, date: "2026-04-20" },
+  { id: "tx-3", name: "Laptop Stand", type: "OUT", quantity: 2, date: "2026-04-19" },
+  { id: "tx-4", name: "Desk Lamp", type: "IN", quantity: 12, date: "2026-04-18" },
+  { id: "tx-5", name: "Keyboard", type: "OUT", quantity: 1, date: "2026-04-18" },
 ];
 
 export const stockMovements: MovementRow[] = [

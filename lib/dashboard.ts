@@ -92,7 +92,7 @@ export async function getRecentTransactions(limit = 20): Promise<TransactionRow[
     await Promise.all([
       supabase
         .from("transactions")
-        .select("product_id,type,quantity,created_at")
+        .select("id,product_id,type,quantity,created_at")
         .order("created_at", { ascending: false })
         .limit(limit),
       supabase.from("products").select("id,name"),
@@ -105,6 +105,7 @@ export async function getRecentTransactions(limit = 20): Promise<TransactionRow[
   const productMap = new Map(products.map((product) => [product.id, product.name]));
 
   return transactions.map((row) => ({
+      id: row.id,
     name: productMap.get(row.product_id) ?? "Unknown product",
     type: row.type,
     quantity: row.quantity,

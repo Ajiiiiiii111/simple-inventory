@@ -113,7 +113,7 @@ export default function TransactionsPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {recentTransactions.map((transaction) => (
-                  <tr key={`${transaction.name}-${transaction.date}-${transaction.type}`} className="hover:bg-slate-50/80">
+                  <tr key={transaction.id} className="hover:bg-slate-50/80">
                     <td className="px-6 py-4 text-sm font-medium text-slate-900 sm:px-7">{transaction.name}</td>
                     <td className="px-6 py-4 text-sm">
                       <span
