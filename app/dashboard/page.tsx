@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { recentTransactions, stockMovements } from "@/lib/inventory";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type DashboardSummary = {
@@ -11,6 +10,20 @@ type DashboardSummary = {
   totalQuantity: number;
   lowStockItems: number;
   outOfStockItems: number;
+};
+
+type Transaction = {
+  id: string;
+  name: string;
+  type: string;
+  quantity: number;
+  date: string;
+};
+
+type StockMovement = {
+  label: string;
+  in: number;
+  out: number;
 };
 
 type SummaryCard = {
@@ -52,6 +65,8 @@ const emptySummary: DashboardSummary = {
 export default function Dashboard() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [message, setMessage] = useState(
     supabase
       ? ""
@@ -72,6 +87,8 @@ export default function Dashboard() {
       if (!token) {
         if (isMounted) {
           setSummary(emptySummary);
+          setTransactions([]);
+          setStockMovements([]);
           setMessage("Sign in to view your dashboard summary.");
         }
         return;
@@ -110,15 +127,61 @@ export default function Dashboard() {
       setMessage("");
     }
 
+    async function fetchTransactions(token: string) {
+      const response = await fetch("/api/dashboard/transactions", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (response.ok) {
+        const body = (await response.json()) as { transactions?: Transaction[] };
+        setTransactions(body.transactions ?? []);
+      }
+    }
+
+    async function fetchStockMovements(token: string) {
+      const response = await fetch("/api/dashboard/stock-movement?range=weekly", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (response.ok) {
+        const body = (await response.json()) as { series?: StockMovement[] };
+        setStockMovements(body.series ?? []);
+      }
+    }
+
     async function loadSession() {
       const { data } = await supabaseClient.auth.getSession();
-      await fetchSummary(data.session?.access_token ?? null);
+      const token = data.session?.access_token ?? null;
+      await fetchSummary(token);
+      if (token) {
+        await fetchTransactions(token);
+        await fetchStockMovements(token);
+      }
     }
 
     void loadSession();
 
     const { data } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-      void fetchSummary(session?.access_token ?? null);
+      const token = session?.access_token ?? null;
+      void fetchSummary(token);
+      if (token) {
+        void fetchTransactions(token);
+        void fetchStockMovements(token);
+      }
     });
 
     return () => {
@@ -178,44 +241,7 @@ export default function Dashboard() {
         </section>
 
         <section className="grid gap-6 lg:grid-cols-2">
-          <article className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
-                  Products
-                </p>
-                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
-                  Add, edit, delete, and track alerts
-                </h2>
-              </div>
-              <Link
-                href="/dashboard/products"
-                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                Open
-              </Link>
-            </div>
-
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              Manage product records and highlight low or critical stock before it becomes a
-              problem.
-            </p>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <Link
-                href="/dashboard/products"
-                className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
-              >
-                Go to Products
-              </Link>
-              <Link
-                href="/dashboard/predictions"
-                className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white"
-              >
-                View Alerts
-              </Link>
-            </div>
-          </article>
+          
 
           <article className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
             <div className="flex items-start justify-between gap-4">
@@ -246,50 +272,27 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {recentTransactions.slice(0, 3).map((transaction) => (
-                    <tr key={`${transaction.name}-${transaction.date}-${transaction.type}`}>
-                      <td className="px-4 py-3 font-medium text-slate-900">{transaction.name}</td>
-                      <td className="px-4 py-3 text-slate-600">{transaction.type}</td>
-                      <td className="px-4 py-3 text-slate-600">{transaction.quantity}</td>
-                      <td className="px-4 py-3 text-slate-600">{transaction.date}</td>
+                  {transactions.length > 0 ? (
+                    transactions.slice(0, 3).map((transaction) => (
+                      <tr key={transaction.id}>
+                        <td className="px-4 py-3 font-medium text-slate-900">{transaction.name}</td>
+                        <td className="px-4 py-3 text-slate-600">{transaction.type}</td>
+                        <td className="px-4 py-3 text-slate-600">{transaction.quantity}</td>
+                        <td className="px-4 py-3 text-slate-600">{transaction.date}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                        No transactions yet. Add products and stock movements to see activity.
+                      </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
           </article>
-        </section>
 
-        <section className="grid gap-6 md:grid-cols-3">
-          <Link
-            href="/dashboard/chart"
-            className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur transition hover:-translate-y-1"
-          >
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
-              Stock Movement Chart
-            </p>
-            <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
-              Daily IN vs OUT trends
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              See how incoming and outgoing stock changes across the week.
-            </p>
-          </Link>
-
-          <Link
-            href="/dashboard/predictions"
-            className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur transition hover:-translate-y-1"
-          >
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
-              Smart Prediction
-            </p>
-            <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
-              Items likely to run out soon
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              Forecast risky items and act before they hit zero.
-            </p>
-          </Link>
 
           <article className="rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
@@ -299,26 +302,44 @@ export default function Dashboard() {
               Quick movement snapshot
             </h2>
             <div className="mt-5 flex items-end gap-3">
-              {stockMovements.map((day) => (
-                <div key={day.label} className="flex flex-1 flex-col items-center gap-2">
-                  <div className="flex h-40 w-full items-end gap-1 rounded-2xl bg-slate-50 p-2">
-                    <div
-                      className="w-1/2 rounded-full bg-emerald-500"
-                      style={{ height: `${Math.max((day.in / 70) * 100, 10)}%` }}
-                      title={`IN ${day.in}`}
-                    />
-                    <div
-                      className="w-1/2 rounded-full bg-sky-500"
-                      style={{ height: `${Math.max((day.out / 70) * 100, 10)}%` }}
-                      title={`OUT ${day.out}`}
-                    />
-                  </div>
-                  <span className="text-xs font-medium text-slate-500">{day.label}</span>
+              {stockMovements.length > 0 ? (
+                stockMovements.map((day, index) => {
+                  const maxTotal = Math.max(
+                    ...stockMovements.map((d) => d.in + d.out),
+                    1
+                  );
+                  return (
+                    <div key={`${index}-${day.label}`} className="flex flex-1 flex-col items-center gap-2">
+                      <div className="flex h-40 w-full items-end gap-1 rounded-2xl bg-slate-50 p-2">
+                        <div
+                          className="w-1/2 rounded-full bg-emerald-500"
+                          style={{
+                            height: `${Math.max((day.in / maxTotal) * 100, 10)}%`,
+                          }}
+                          title={`IN ${day.in}`}
+                        />
+                        <div
+                          className="w-1/2 rounded-full bg-sky-500"
+                          style={{
+                            height: `${Math.max((day.out / maxTotal) * 100, 10)}%`,
+                          }}
+                          title={`OUT ${day.out}`}
+                        />
+                      </div>
+                      <span className="text-xs font-medium text-slate-500">{day.label}</span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-slate-50">
+                  <span className="text-slate-500">No stock movements yet</span>
                 </div>
-              ))}
+              )}
             </div>
           </article>
         </section>
+
+    
       </div>
     </main>
   );

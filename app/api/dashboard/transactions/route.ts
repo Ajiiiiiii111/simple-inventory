@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseUserClient } from "@/lib/supabase/server";
 
 type TransactionRow = {
+  id: string;
   name: string;
   type: "IN" | "OUT";
   quantity: number;
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
       await Promise.all([
         supabase
           .from("transactions")
-          .select("product_id,type,quantity,created_at")
+          .select("id,product_id,type,quantity,created_at")
           .eq("user_id", auth.user.id)
           .order("created_at", { ascending: false })
           .limit(limit),
@@ -58,6 +59,7 @@ export async function GET(request: Request) {
 
     const productMap = new Map(products.map((product) => [product.id, product.name]));
     const rows: TransactionRow[] = transactions.map((row) => ({
+      id: row.id,
       name: productMap.get(row.product_id) ?? "Unknown product",
       type: row.type,
       quantity: row.quantity,
