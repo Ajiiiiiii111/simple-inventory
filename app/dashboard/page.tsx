@@ -1,8 +1,139 @@
-import Link from "next/link";
+"use client";
 
-import { inventoryMetrics, recentTransactions, stockMovements } from "@/lib/inventory";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+
+import { recentTransactions, stockMovements } from "@/lib/inventory";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+
+type DashboardSummary = {
+  totalProducts: number;
+  totalQuantity: number;
+  lowStockItems: number;
+  outOfStockItems: number;
+};
+
+type SummaryCard = {
+  label: string;
+  detail: string;
+  accent: string;
+};
+
+const summaryCards: SummaryCard[] = [
+  {
+    label: "Total Products",
+    detail: "Unique items tracked across your account",
+    accent: "from-slate-900 to-slate-700",
+  },
+  {
+    label: "Total Quantity",
+    detail: "Combined units available in inventory",
+    accent: "from-emerald-600 to-teal-500",
+  },
+  {
+    label: "Low Stock Items",
+    detail: "Items below the reorder threshold of 10",
+    accent: "from-amber-500 to-orange-500",
+  },
+  {
+    label: "Out of Stock Items",
+    detail: "Items currently at zero quantity",
+    accent: "from-rose-600 to-red-500",
+  },
+];
+
+const emptySummary: DashboardSummary = {
+  totalProducts: 0,
+  totalQuantity: 0,
+  lowStockItems: 0,
+  outOfStockItems: 0,
+};
 
 export default function Dashboard() {
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
+  const [message, setMessage] = useState(
+    supabase
+      ? ""
+      : "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local, then restart the dev server.",
+  );
+
+  useEffect(() => {
+    const client = supabase;
+
+    if (!client) {
+      return;
+    }
+
+    const supabaseClient = client;
+    let isMounted = true;
+
+    async function fetchSummary(token: string | null) {
+      if (!token) {
+        if (isMounted) {
+          setSummary(emptySummary);
+          setMessage("Sign in to view your dashboard summary.");
+        }
+        return;
+      }
+
+      const response = await fetch("/api/dashboard/summary", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        totalProducts?: number;
+        totalQuantity?: number;
+        lowStockItems?: number;
+        outOfStockItems?: number;
+      };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (!response.ok) {
+        setSummary(emptySummary);
+        setMessage(body.error ?? "Unable to load dashboard summary.");
+        return;
+      }
+
+      setSummary({
+        totalProducts: body.totalProducts ?? 0,
+        totalQuantity: body.totalQuantity ?? 0,
+        lowStockItems: body.lowStockItems ?? 0,
+        outOfStockItems: body.outOfStockItems ?? 0,
+      });
+      setMessage("");
+    }
+
+    async function loadSession() {
+      const { data } = await supabaseClient.auth.getSession();
+      await fetchSummary(data.session?.access_token ?? null);
+    }
+
+    void loadSession();
+
+    const { data } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      void fetchSummary(session?.access_token ?? null);
+    });
+
+    return () => {
+      isMounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  const summaryValues = [
+    summary.totalProducts,
+    summary.totalQuantity,
+    summary.lowStockItems,
+    summary.outOfStockItems,
+  ];
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#eef2ff_45%,_#e2e8f0_100%)] px-6 py-10 text-slate-900 sm:px-8 lg:px-12">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
@@ -19,31 +150,14 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-[1fr_auto]">
-          <label className="flex items-center gap-3 rounded-2xl border border-white/70 bg-white/85 px-4 py-3 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
-            <span className="text-sm font-medium text-slate-500">Search</span>
-            <input
-              type="search"
-              placeholder="Search products, stock, or transactions"
-              className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-            />
-          </label>
-
-          <div className="flex flex-wrap gap-3">
-            <Link className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/20 transition hover:-translate-y-0.5" href="/dashboard/products?mode=add">
-              Add Product
-            </Link>
-            <Link className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5" href="/dashboard/products?mode=in">
-              Stock In
-            </Link>
-            <Link className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-600/20 transition hover:-translate-y-0.5" href="/dashboard/products?mode=out">
-              Stock Out
-            </Link>
+        {message ? (
+          <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-700 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+            {message}
           </div>
-        </section>
+        ) : null}
 
         <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-          {inventoryMetrics.map((metric) => (
+          {summaryCards.map((metric, index) => (
             <article
               key={metric.label}
               className="group overflow-hidden rounded-3xl border border-white/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur transition-transform duration-300 hover:-translate-y-1 hover:shadow-[0_28px_80px_rgba(15,23,42,0.12)]"
@@ -52,7 +166,7 @@ export default function Dashboard() {
               <p className="mt-6 text-sm font-medium text-slate-500">{metric.label}</p>
               <div className="mt-3 flex items-end justify-between gap-4">
                 <h2 className="text-4xl font-semibold tracking-tight text-slate-950">
-                  {metric.value}
+                  {summaryValues[index]}
                 </h2>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Summary
