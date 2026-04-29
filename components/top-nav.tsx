@@ -75,7 +75,7 @@ export function TopNav() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-6 py-4 sm:px-8 lg:px-12 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
-            Simple Inventory
+            Smart Inventory
           </p>
           <p className="mt-1 text-sm text-slate-600">
             Products, transactions, charts, and predictions in one place.

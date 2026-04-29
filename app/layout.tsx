@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Simple Inventory",
+  title: "Smart Inventory",
   description: "Inventory dashboard with products, transactions, stock movement, and predictions.",
 };
 
