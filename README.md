@@ -40,6 +40,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 1. Create a Supabase project and copy your project URL, anon key, and service role key.
 2. Copy `.env.example` to `.env.local` and set real values.
 3. Enable email confirmations in Supabase Auth so new registrations must verify their email.
+	If you want a 6-digit code email, update the Supabase Auth email template to use `{{ .Token }}` instead of `{{ .ConfirmationURL }}` so it sends a verification code instead of a magic link.
 4. Open Supabase SQL Editor and run `supabase/schema.sql`.
 5. Start the app with `npm run dev`.
 

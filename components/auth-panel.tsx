@@ -133,7 +133,7 @@ export function AuthPanel() {
 
       setRegisterStep("code");
       setResendCountdown(resendCooldownSeconds);
-      setMessage("A 6-digit code was sent to your email. Enter it to continue registration.");
+      setMessage("A verification code was sent to your email. Enter it to continue registration.");
     } catch {
       setMessage("Unable to send verification code.");
     } finally {
@@ -147,8 +147,8 @@ export function AuthPanel() {
       return;
     }
 
-    if (!email || code.length !== 6) {
-      setMessage("Enter your email and a valid 6-digit code.");
+    if (!email || !code) {
+      setMessage("Enter your email and verification code.");
       return;
     }
 
@@ -285,7 +285,39 @@ export function AuthPanel() {
       return;
     }
 
-    await sendRegisterCode(form.email.trim());
+    if (!supabase) {
+      return;
+    }
+
+    const email = form.email.trim();
+
+    if (!email) {
+      setMessage("Enter your email first.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: true,
+        },
+      });
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      setResendCountdown(resendCooldownSeconds);
+      setMessage("Code sent again. Check your inbox.");
+    } catch {
+      setMessage("Unable to resend the verification code.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function handleSignOut() {
@@ -385,9 +417,9 @@ export function AuthPanel() {
             {mode === "login"
               ? "Use your existing account to sign in."
               : registerStep === "email"
-                ? "Step 1 of 3: Enter your email to receive a 6-digit code."
+                ? "Step 1 of 3: Enter your email to receive a verification code."
                 : registerStep === "code"
-                  ? "Step 2 of 3: Enter the 6-digit code sent to your email."
+                  ? "Step 2 of 3: Enter the code sent to your email."
                   : "Step 3 of 3: Set your password to finish registration."}
           </p>
 
@@ -410,20 +442,18 @@ export function AuthPanel() {
           {mode === "register" && registerStep === "code" ? (
             <div>
               <label htmlFor="otpCode" className="text-sm font-medium text-slate-300">
-                6-digit code
+                Verification code
               </label>
               <input
                 id="otpCode"
                 type="text"
                 inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
                 value={form.code}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, code: event.target.value.replace(/\D/g, "") }))
                 }
                 className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-white/30"
-                placeholder="123456"
+                placeholder="Enter the code from your email"
                 autoComplete="one-time-code"
               />
             </div>
